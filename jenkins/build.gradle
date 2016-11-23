@@ -1,0 +1,81 @@
+apply plugin: 'groovy'
+
+repositories {
+    mavenCentral()
+    jcenter()
+    maven { url 'http://repo.jenkins-ci.org/releases/' }
+    maven { url 'http://nexus.delivery.puppetlabs.net/content/repositories/releases/' }
+}
+
+configurations {
+    dslLibs
+}
+
+dependencies {
+    compile 'org.codehaus.groovy:groovy-all:2.4.4'
+    compile "org.jenkins-ci.plugins:job-dsl-core:${jobDslVersion}"
+    compile "puppetlabs:puppet-jobdsl-lib:${puppetJobDslLibVersion}" //to support task:debugXML
+
+    testCompile 'org.spockframework:spock-core:1.0-groovy-2.4'
+    testCompile "org.jenkins-ci.plugins:job-dsl:${jobDslVersion}"
+    testCompile "puppetlabs:puppet-jobdsl-lib:${puppetJobDslLibVersion}" //to support task:test
+
+    dslLibs "puppetlabs:puppet-jobdsl-lib:${puppetJobDslLibVersion}" //to support task:dslLibs
+}
+
+task wrapper(type: Wrapper) {
+    gradleVersion = '2.14'
+}
+
+/**
+ * The following is necessary in order to get successive calles to 'gradle test'
+ * to rerun the tests (which is what I suspect most people would expect to be
+ * the behavior of a command that runs test given the behavior of test runners
+ * like beaker, leiningen, rspec).
+ */
+test.outputs.upToDateWhen {
+    return false
+}
+
+test {
+    // This enable logging the println in the SeedsValidityTest.groovy file
+    testLogging {
+        events 'standard_out', 'standard_error'
+    }
+}
+
+// using an existing method in the jobdsl library called 'run' that can output
+// the XML job files specify the 'source' argument on the command line:
+// ./gradlew debugXML -Psource=seeds/exampleJob.groovy
+task debugXML(dependsOn: 'classes', type: JavaExec) {
+  def String working_dir = mkdir("build/tmp/debugXml")
+  def String original_working_dir = System.getenv("PWD")
+
+  doFirst {
+    if(!project.hasProperty('source')){
+      throw new GradleException('ERROR: Usage ./gradlew debugXML -Psource=seeds/exampleJob.groovy')
+    }
+  }
+
+  if(project.hasProperty('source')){
+    def files = []
+    source.split(',').each { example ->
+        files << (original_working_dir + "/" + example)
+    }
+    args(files)
+    main = 'javaposse.jobdsl.Run'
+    classpath = sourceSets.main.runtimeClasspath
+    workingDir = working_dir
+  }
+}
+
+task dslLibs(type: Copy) {
+    into 'jobdsl-libs'
+    from configurations.dslLibs
+}
+
+task cleanDslLibs(type: Delete) {
+    delete 'jobdsl-libs'
+}
+
+clean.dependsOn cleanDslLibs
